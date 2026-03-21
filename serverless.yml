@@ -1,0 +1,59 @@
+service: perplexity-search-api
+frameworkVersion: '4'
+
+provider:
+  name: aws
+  runtime: python3.10
+  architecture: arm64
+  region: us-east-1
+  ecr:
+    images:
+      perplexity_image:
+        path: ./
+  httpApi:
+    cors: true
+
+functions:
+  perplexity_search:
+    image:
+      name: perplexity_image
+      command:
+        - handler.perplexity_search
+    timeout: 30
+    events:
+      - httpApi:
+          path: /search-perplexity
+          method: post
+
+  perplexity_chat:
+    image:
+      name: perplexity_image
+      command:
+        - handler.perplexity_chat
+    timeout: 30
+    events:
+      - httpApi:
+          path: /chat-perplexity
+          method: post
+
+  firecrawl_batch_scrape:
+    image:
+      name: perplexity_image
+      command:
+        - handler.firecrawl_batch_scrape
+    timeout: 30
+    events:
+      - httpApi:
+          path: /batch-scrape
+          method: post
+
+  firecrawl_batch_status:
+    image:
+      name: perplexity_image
+      command:
+        - handler.firecrawl_batch_status
+    timeout: 30
+    events:
+      - httpApi:
+          path: /batch-scrape-status
+          method: post
