@@ -1,6 +1,8 @@
 import json
 import urllib.request
 
+import boto3
+
 from conf import perplexity_api_key, api_secret_key, firecrawl_api_key
 
 PERPLEXITY_SEARCH_URL = "https://api.perplexity.ai/search"
@@ -10,6 +12,13 @@ PERPLEXITY_DEFAULT_MAX_TOKENS_PER_PAGE = 256
 PERPLEXITY_CHAT_DEFAULT_MODEL = "sonar-pro"
 PERPLEXITY_CHAT_DEFAULT_MAX_TOKENS = 4000
 PERPLEXITY_CHAT_DEFAULT_TEMPERATURE = 0.1
+
+BEDROCK_AGENT_ID = "CIARP5VKY3"
+BEDROCK_AGENT_ALIAS_ID = "TSTALIASID"
+BEDROCK_REGION = "us-east-1"
+BEDROCK_DEFAULT_SESSION_ID = "default-session"
+
+_bedrock_client = boto3.client("bedrock-agent-runtime", region_name=BEDROCK_REGION)
 
 
 def _validate_request(event):
@@ -252,11 +261,11 @@ def firecrawl_batch_scrape(event, context):
     if event_body is not None:
         event_body_json_load = json.loads(event_body)
         urls = event_body_json_load.get("urls")
-        formats = event_body_json_load.get("formats", ["markdown"])
+        formats = event_body_json_load.get("formats", ["json"])
         only_main_content = event_body_json_load.get("onlyMainContent", True)
     else:
         urls = event.get("urls")
-        formats = event.get("formats", ["markdown"])
+        formats = event.get("formats", ["json"])
         only_main_content = event.get("onlyMainContent", True)
 
     if not urls or not isinstance(urls, list):
@@ -406,6 +415,87 @@ def firecrawl_batch_status(event, context):
             "statusCode": 500,
             "status": "error",
             "body": json.dumps({"error": f"Failed to check batch status: {str(e)}"}),
+            "headers": {
+                'Access-Control-Allow-Origin': allowed_origin,
+                'Content-Type': 'application/json'
+            }
+        }
+
+
+def bedrock_chat(event, context):
+    """Chat with an Amazon Bedrock Agent and return the concatenated streamed response."""
+    print('bedrock chat event: ', json.dumps(event))
+
+    allowed_origin, error_response = _validate_request(event)
+    if error_response:
+        return error_response
+
+    event_body = event.get("body", None)
+
+    if event_body is not None:
+        event_body_json_load = json.loads(event_body)
+        message = event_body_json_load.get("message")
+        session_id = event_body_json_load.get("sessionId") or BEDROCK_DEFAULT_SESSION_ID
+        user_profile = event_body_json_load.get("userProfile") or {}
+    else:
+        message = event.get("message")
+        session_id = event.get("sessionId") or BEDROCK_DEFAULT_SESSION_ID
+        user_profile = event.get("userProfile") or {}
+
+    if not message:
+        return {
+            "statusCode": 400,
+            "status": "error",
+            "body": json.dumps({"error": "No message provided"}),
+            "headers": {
+                'Access-Control-Allow-Origin': allowed_origin,
+                'Content-Type': 'application/json'
+            }
+        }
+
+    session_attributes = {
+        "userName": user_profile.get("name") or "",
+        "businessName": user_profile.get("business") or "",
+        "email": user_profile.get("email") or "",
+    }
+
+    try:
+        print(f'Invoking Bedrock agent {BEDROCK_AGENT_ID} (session={session_id}): {message[:200]}...')
+
+        response = _bedrock_client.invoke_agent(
+            agentId=BEDROCK_AGENT_ID,
+            agentAliasId=BEDROCK_AGENT_ALIAS_ID,
+            sessionId=session_id,
+            inputText=message,
+            sessionState={"sessionAttributes": session_attributes},
+        )
+
+        full_response = ""
+        for stream_event in response["completion"]:
+            chunk = stream_event.get("chunk")
+            if chunk and chunk.get("bytes"):
+                full_response += chunk["bytes"].decode("utf-8")
+
+        print(f'Bedrock agent response length: {len(full_response)} characters')
+
+        return {
+            "statusCode": 200,
+            "status": "success",
+            "body": json.dumps({"response": full_response}),
+            "headers": {
+                'Access-Control-Allow-Origin': allowed_origin,
+                'Content-Type': 'application/json'
+            }
+        }
+
+    except Exception as e:
+        print(f"Error invoking Bedrock agent: {str(e)}")
+        import traceback
+        print(f"Full traceback: {traceback.format_exc()}")
+        return {
+            "statusCode": 500,
+            "status": "error",
+            "body": json.dumps({"error": f"Failed to invoke Bedrock agent: {str(e)}"}),
             "headers": {
                 'Access-Control-Allow-Origin': allowed_origin,
                 'Content-Type': 'application/json'

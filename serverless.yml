@@ -12,6 +12,14 @@ provider:
         path: ./
   httpApi:
     cors: true
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - bedrock:InvokeAgent
+          Resource:
+            - arn:aws:bedrock:us-east-1:*:agent-alias/CIARP5VKY3/TSTALIASID
 
 functions:
   perplexity_search:
@@ -56,4 +64,15 @@ functions:
     events:
       - httpApi:
           path: /batch-scrape-status
+          method: post
+
+  bedrock_chat:
+    image:
+      name: perplexity_image
+      command:
+        - handler.bedrock_chat
+    timeout: 30
+    events:
+      - httpApi:
+          path: /bedrock-chat
           method: post
