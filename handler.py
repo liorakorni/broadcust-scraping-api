@@ -1,12 +1,14 @@
 import json
+import urllib.parse
 import urllib.request
 
 import boto3
 
-from conf import perplexity_api_key, api_secret_key, firecrawl_api_key
+from conf import perplexity_api_key, api_secret_key, firecrawl_api_key, serpapi_key
 
 PERPLEXITY_SEARCH_URL = "https://api.perplexity.ai/search"
 PERPLEXITY_CHAT_URL = "https://api.perplexity.ai/chat/completions"
+SERPAPI_SEARCH_URL = "https://serpapi.com/search.json"
 PERPLEXITY_DEFAULT_MAX_RESULTS = 3
 PERPLEXITY_DEFAULT_MAX_TOKENS_PER_PAGE = 256
 PERPLEXITY_CHAT_DEFAULT_MODEL = "sonar-pro"
@@ -238,6 +240,133 @@ def perplexity_chat(event, context):
             "statusCode": 500,
             "status": "error",
             "body": json.dumps({"error": f"Failed to chat: {str(e)}"}),
+            "headers": {
+                'Access-Control-Allow-Origin': allowed_origin,
+                'Content-Type': 'application/json'
+            }
+        }
+
+
+def serpapi(event, context):
+    """Proxy supported SerpAPI methods while keeping the API key server-side."""
+    print('serpapi event: ', json.dumps(event))
+
+    allowed_origin, error_response = _validate_request(event)
+    if error_response:
+        return error_response
+
+    event_body = event.get("body", None)
+    if event_body is not None:
+        try:
+            body_data = json.loads(event_body)
+        except json.JSONDecodeError:
+            return {
+                "statusCode": 400,
+                "status": "error",
+                "body": json.dumps({"error": "Invalid JSON in request body"}),
+                "headers": {
+                    'Access-Control-Allow-Origin': allowed_origin,
+                    'Content-Type': 'application/json'
+                }
+            }
+    else:
+        body_data = event
+
+    method = body_data.get("method")
+    if method != "search.json":
+        return {
+            "statusCode": 400,
+            "status": "error",
+            "body": json.dumps({
+                "error": "Unsupported method",
+                "supportedMethods": ["search.json"]
+            }),
+            "headers": {
+                'Access-Control-Allow-Origin': allowed_origin,
+                'Content-Type': 'application/json'
+            }
+        }
+
+    params = body_data.get("params")
+    if not isinstance(params, dict):
+        return {
+            "statusCode": 400,
+            "status": "error",
+            "body": json.dumps({"error": "params must be an object"}),
+            "headers": {
+                'Access-Control-Allow-Origin': allowed_origin,
+                'Content-Type': 'application/json'
+            }
+        }
+
+    query = str(params.get("q") or "").strip()
+    if not query:
+        return {
+            "statusCode": 400,
+            "status": "error",
+            "body": json.dumps({"error": "params.q is required"}),
+            "headers": {
+                'Access-Control-Allow-Origin': allowed_origin,
+                'Content-Type': 'application/json'
+            }
+        }
+
+    if not serpapi_key:
+        print('ERROR: serpapi_key not configured in conf.py')
+        return {
+            "statusCode": 500,
+            "status": "error",
+            "body": json.dumps({"error": "Server configuration error"}),
+            "headers": {
+                'Access-Control-Allow-Origin': allowed_origin,
+                'Content-Type': 'application/json'
+            }
+        }
+
+    request_params = {
+        "gl": "il",
+        "hl": "he",
+        "num": 20,
+        **params,
+        "api_key": serpapi_key,
+    }
+    url = f"{SERPAPI_SEARCH_URL}?{urllib.parse.urlencode(request_params, doseq=True)}"
+
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            response_data = resp.read().decode('utf-8')
+
+        print(f'SerpAPI response length: {len(response_data)} characters')
+
+        return {
+            "statusCode": 200,
+            "status": "success",
+            "body": response_data,
+            "headers": {
+                'Access-Control-Allow-Origin': allowed_origin,
+                'Content-Type': 'application/json'
+            }
+        }
+    except urllib.request.HTTPError as e:
+        error_body = e.read().decode('utf-8') if e.fp else str(e)
+        print(f"SerpAPI error ({e.code}): {error_body}")
+        return {
+            "statusCode": e.code,
+            "status": "error",
+            "body": json.dumps({"error": f"SerpAPI error: {error_body}"}),
+            "headers": {
+                'Access-Control-Allow-Origin': allowed_origin,
+                'Content-Type': 'application/json'
+            }
+        }
+    except Exception as e:
+        print(f"Error with SerpAPI: {str(e)}")
+        import traceback
+        print(f"Full traceback: {traceback.format_exc()}")
+        return {
+            "statusCode": 500,
+            "status": "error",
+            "body": json.dumps({"error": f"Failed to search SerpAPI: {str(e)}"}),
             "headers": {
                 'Access-Control-Allow-Origin': allowed_origin,
                 'Content-Type': 'application/json'

@@ -44,6 +44,17 @@ functions:
           path: /chat-perplexity
           method: post
 
+  serpapi:
+    image:
+      name: perplexity_image
+      command:
+        - handler.serpapi
+    timeout: 30
+    events:
+      - httpApi:
+          path: /serpapi
+          method: post
+
   firecrawl_batch_scrape:
     image:
       name: perplexity_image
