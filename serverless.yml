@@ -10,34 +10,18 @@ provider:
     images:
       perplexity_image:
         path: ./
+        platform: linux/arm64
+        # Docker 25+ attaches provenance/SBOM attestations, producing a manifest list
+        # that Lambda rejects ("image manifest, config or layer media type ... not supported").
+        buildOptions:
+          - --provenance=false
+          - --sbom=false
   httpApi:
     cors: true
   environment:
     PERPLEXITY_API_KEY: ${ssm:/broadcust/scraping-api/perplexity-api-key}
     FIRECRAWL_API_KEY: ${ssm:/broadcust/scraping-api/firecrawl-api-key}
     SERPAPI_KEY: ${ssm:/broadcust/scraping-api/serpapi-key}
-    BEDROCK_JOBS_TABLE: ${self:service}-${sls:stage}-bedrock-chat-jobs
-    BEDROCK_WORKER_FUNCTION_NAME: ${self:service}-${sls:stage}-bedrock_chat_worker
-  iam:
-    role:
-      statements:
-        - Effect: Allow
-          Action:
-            - bedrock:InvokeAgent
-          Resource:
-            - arn:aws:bedrock:us-east-1:*:agent-alias/CIARP5VKY3/TSTALIASID
-        - Effect: Allow
-          Action:
-            - dynamodb:PutItem
-            - dynamodb:GetItem
-            - dynamodb:UpdateItem
-          Resource:
-            - arn:aws:dynamodb:us-east-1:*:table/${self:service}-${sls:stage}-bedrock-chat-jobs
-        - Effect: Allow
-          Action:
-            - lambda:InvokeFunction
-          Resource:
-            - arn:aws:lambda:us-east-1:*:function:${self:service}-${sls:stage}-bedrock_chat_worker
 
 functions:
   perplexity_search:
@@ -94,49 +78,3 @@ functions:
       - httpApi:
           path: /batch-scrape-status
           method: post
-
-  bedrock_chat:
-    image:
-      name: perplexity_image
-      command:
-        - handler.bedrock_chat
-    timeout: 30
-    events:
-      - httpApi:
-          path: /bedrock-chat
-          method: post
-
-  bedrock_chat_worker:
-    image:
-      name: perplexity_image
-      command:
-        - handler.bedrock_chat_worker
-    timeout: 900
-
-  bedrock_chat_status:
-    image:
-      name: perplexity_image
-      command:
-        - handler.bedrock_chat_status
-    timeout: 30
-    events:
-      - httpApi:
-          path: /bedrock-chat-status
-          method: post
-
-resources:
-  Resources:
-    BedrockChatJobsTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:service}-${sls:stage}-bedrock-chat-jobs
-        BillingMode: PAY_PER_REQUEST
-        AttributeDefinitions:
-          - AttributeName: jobId
-            AttributeType: S
-        KeySchema:
-          - AttributeName: jobId
-            KeyType: HASH
-        TimeToLiveSpecification:
-          AttributeName: expiresAt
-          Enabled: true
